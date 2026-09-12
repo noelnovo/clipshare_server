@@ -21,6 +21,9 @@ func Start(ctx context.Context, cfg *config.Config) error {
 	if err := advertiseIfEnabled(ctx, cfg); err != nil {
 		return fmt.Errorf("mdns advertise: %w", err)
 	}
+	if err := startWiFiDirect(ctx, cfg); err != nil {
+		return fmt.Errorf("wifi direct advertise: %w", err)
+	}
 
 	go func() {
 		if err := beaconIfEnabled(ctx, cfg); err != nil {

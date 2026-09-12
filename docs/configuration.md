@@ -32,6 +32,8 @@ platform.
 | `max_message_bytes` | int | `10485760` | Maximum WebSocket message size allowed from clients. 0 or negative falls back to 10 MiB. |
 | `server.port` | int | `40403` | WebSocket listen port. |
 | `server.bind` | string | `"0.0.0.0"` | WebSocket listen address. Use `127.0.0.1` to accept only local connections. |
+| `wifi_direct.enabled` | bool | `true` | Advertise the WebSocket endpoint on an already-formed Wi-Fi Direct interface. |
+| `wifi_direct.interfaces` | []string | `[]` | Optional exact interface names. Empty uses P2P names and common Android/Windows P2P address ranges. |
 | `api.port` | int | `40405` | Localhost control API port. |
 | `api.bind` | string | `"127.0.0.1"` | Localhost control API bind address. |
 | `connection.mode` | string | `"discover"` | How this daemon finds and trusts peers. `"discover"` or `"whitelist"` (below). |
@@ -53,6 +55,31 @@ It only has effect when `connection.mode = "discover"`.
 | `discovery.beacon` | bool | `true` | Send UDP broadcast beacons. |
 | `discovery.beacon_port` | int | `40404` | UDP beacon destination port. Must match the Android client's "Beacon port" setting if changed. |
 | `discovery.beacon_addr` | string | `"255.255.255.255"` | UDP beacon destination address. |
+
+### Wi-Fi Direct
+
+The daemon supports the server side of an existing Wi-Fi Direct link. It polls
+network interfaces and publishes the same `_clipshare._tcp` DNS-SD service on
+matching P2P interfaces. Clipboard traffic still uses WebSocket TCP `40403`.
+
+The daemon does not create or join a Wi-Fi Direct group itself. Android uses
+`WifiP2pManager`; Windows and Linux must first create the P2P connection using
+their platform networking tools or a companion integration. Once the P2P
+interface exists, the daemon advertises automatically.
+
+Automatic detection recognizes interface names containing `p2p`, `Wi-Fi Direct`,
+or `WiFi Direct`, plus the common `192.168.49.0/24` and `192.168.137.0/24`
+group ranges. For other drivers, configure the exact interface name:
+
+```toml
+[wifi_direct]
+enabled = true
+interfaces = ["my-p2p-interface"]
+```
+
+Wi-Fi Direct link encryption does not replace ClipShare authentication. Use
+TLS/mTLS or a token, and set `tls.verify_hostname = false` when the P2P address
+is dynamically assigned.
 
 ### Timing
 

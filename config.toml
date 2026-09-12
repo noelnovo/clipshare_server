@@ -32,6 +32,13 @@ beacon = true
 beacon_port = 40404
 beacon_addr = "255.255.255.255"
 
+[wifi_direct]
+# Advertise on an already-formed Wi-Fi Direct interface. Group creation is
+# handled by the operating system or companion app.
+enabled = true
+# Leave empty for automatic P2P interface detection, or set names explicitly.
+interfaces = []
+
 [clipboard]
 backend = "auto"
 

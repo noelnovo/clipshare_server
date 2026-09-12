@@ -22,6 +22,8 @@ the peer device.
 - **Loop protection** — never rebroadcasts content it wrote itself
 - **Zero-config discovery** — mDNS (`_clipshare._tcp`) + UDP beacons on `40404`
   so the phone connects automatically
+- **Wi-Fi Direct advertisement** — publishes the WebSocket endpoint on an
+  already-formed P2P interface, so Android devices can share without a router
 - **One-shot `send`** — push text (or your current clipboard) without keeping a
   daemon running; it starts transiently, delivers, and exits
 - Cross-platform: **Linux** (Wayland + X11) and **Windows**
@@ -186,6 +188,10 @@ The platform config path, generated with `clipshare config --init`:
 | `[log] file`    | `""`     | log file path (empty = stderr)              |
 
 Ports: WS/TCP `40403`, UDP beacon `40404`, localhost API `40405` (127.0.0.1 only).
+
+When a Wi-Fi Direct group has already been formed by the operating system, the
+daemon advertises itself on the P2P interface automatically. See
+[Wi-Fi Direct configuration](docs/configuration.md#wifi-direct).
 
 > **Full configuration reference:** [docs/configuration.md](docs/configuration.md) —
 > every key, both connection modes, and how to set up mutual TLS with

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -24,6 +25,7 @@ type Config struct {
 	MaxImageBytes   int64      `toml:"max_image_bytes"`
 	MaxMessageBytes int64      `toml:"max_message_bytes"`
 	Discovery       Discovery  `toml:"discovery"`
+	WiFiDirect      WiFiDirect `toml:"wifi_direct"`
 	Timing          Timing     `toml:"timing"`
 	Clipboard       Clipboard  `toml:"clipboard"`
 	Log             Log        `toml:"log"`
@@ -57,6 +59,14 @@ type Discovery struct {
 	Beacon     bool   `toml:"beacon"`
 	BeaconPort int    `toml:"beacon_port"`
 	BeaconAddr string `toml:"beacon_addr"`
+}
+
+// WiFiDirect controls advertisement on an already-formed Wi-Fi Direct link.
+// Group creation remains platform-owned; the daemon only discovers the P2P
+// interface and advertises its existing WebSocket endpoint there.
+type WiFiDirect struct {
+	Enabled    bool     `toml:"enabled"`
+	Interfaces []string `toml:"interfaces"`
 }
 
 // Clipboard selects the clipboard backend on Linux. Windows ignores this
@@ -130,8 +140,9 @@ func Default() *Config {
 			BeaconPort: 40404,
 			BeaconAddr: "255.255.255.255",
 		},
-		Clipboard: Clipboard{Backend: "auto"},
-		Log:       Log{Level: "info"},
+		WiFiDirect: WiFiDirect{Enabled: true},
+		Clipboard:  Clipboard{Backend: "auto"},
+		Log:        Log{Level: "info"},
 		Timing: Timing{
 			HelloTimeout:       5 * time.Second,
 			WriteTimeout:       3 * time.Second,
@@ -197,6 +208,7 @@ func Load() (*Config, error) {
 		cfg.Discovery.BeaconAddr = "255.255.255.255"
 	}
 	cfg.Clipboard.Backend = normalizeClipboardBackend(cfg.Clipboard.Backend)
+	cfg.WiFiDirect.Interfaces = normalizeInterfaces(cfg.WiFiDirect.Interfaces)
 	cfg.Log.Level = normalizeLogLevel(cfg.Log.Level)
 
 	// Keep the deprecated top-level field in sync so re-saving is consistent.
@@ -305,6 +317,10 @@ beacon = %v
 beacon_port = %d
 beacon_addr = %q
 
+[wifi_direct]
+enabled = %v
+interfaces = %s
+
 [clipboard]
 backend = %q
 
@@ -334,6 +350,7 @@ verify_hostname = %v
 		c.Server.Port, c.Server.Bind,
 		c.API.Port, c.API.Bind,
 		c.Discovery.MDNS, c.Discovery.Beacon, c.Discovery.BeaconPort, c.Discovery.BeaconAddr,
+		c.WiFiDirect.Enabled, tomlSlice(c.WiFiDirect.Interfaces),
 		c.Clipboard.Backend,
 		c.Log.Level, c.Log.File,
 		c.Timing.HelloTimeout, c.Timing.WriteTimeout, c.Timing.PeerKeepalive,
@@ -396,6 +413,23 @@ func normalizeLogLevel(v string) string {
 	default:
 		return "info"
 	}
+}
+
+func normalizeInterfaces(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (c *Config) BroadcastInterval() time.Duration {
