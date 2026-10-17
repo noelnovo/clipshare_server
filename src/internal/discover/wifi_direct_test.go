@@ -3,6 +3,8 @@ package discover
 import (
 	"net"
 	"testing"
+
+	"clipshare/src/internal/config"
 )
 
 func TestMatchesWiFiDirectInterface(t *testing.T) {
@@ -40,5 +42,28 @@ func TestSanitizeHost(t *testing.T) {
 	}
 	if got := sanitizeHost(" "); got != "clipshare" {
 		t.Errorf("sanitizeHost(blank) = %q, want clipshare", got)
+	}
+}
+
+func TestInterfaceKeyIsStable(t *testing.T) {
+	key := interfaceKey(nil, nil)
+	if key != "" {
+		t.Errorf("interfaceKey(nil, nil) = %q, want empty", key)
+	}
+}
+
+func TestStartPlatformWiFiDirectDisabled(t *testing.T) {
+	cfg := &config.Config{WiFiDirect: config.WiFiDirect{Enabled: false}}
+	if err := startPlatformWiFiDirect(t.Context(), cfg); err != nil {
+		t.Errorf("startPlatformWiFiDirect(disabled) = %v, want nil", err)
+	}
+}
+
+func TestStartWhitelistModeDoesNotAdvertise(t *testing.T) {
+	cfg := config.Default()
+	cfg.Connection.Mode = config.ModeWhitelist
+	cfg.WiFiDirect.Enabled = false
+	if err := Start(t.Context(), cfg); err != nil {
+		t.Errorf("Start(whitelist) = %v, want nil", err)
 	}
 }

@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -45,14 +46,24 @@ func (pc *PeerClient) run(ctx context.Context, host, version string) {
 		addr += ":" + strconv.Itoa(pc.srv.cfg.Server.Port)
 	}
 	scheme := consts.SchemeWS
-	var opts *websocket.DialOptions
+	var tlsCfg *tls.Config
 	if pc.srv.cfg.TLS.Enabled {
 		scheme = consts.SchemeWSS
-		tlsCfg, err := pc.srv.peerTLSConfig()
+		cfg, err := pc.srv.peerTLSConfig()
 		if err != nil {
 			log.Errorf("peer %s: tls config: %v", host, err)
 			return
 		}
+		tlsCfg = cfg
+	}
+	pc.dialLoop(ctx, host, addr, scheme, tlsCfg, version)
+}
+
+// dialLoop keeps a connection to addr open, reconnecting with backoff, until
+// ctx is done. tlsCfg is used only for wss.
+func (pc *PeerClient) dialLoop(ctx context.Context, host, addr, scheme string, tlsCfg *tls.Config, version string) {
+	var opts *websocket.DialOptions
+	if tlsCfg != nil {
 		opts = &websocket.DialOptions{
 			HTTPClient: &http.Client{Transport: &http.Transport{TLSClientConfig: tlsCfg}},
 		}

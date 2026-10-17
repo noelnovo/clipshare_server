@@ -33,10 +33,10 @@ beacon_port = 40404
 beacon_addr = "255.255.255.255"
 
 [wifi_direct]
-# Advertise on an already-formed Wi-Fi Direct interface. Group creation is
-# handled by the operating system or companion app.
+# Windows advertises as a Wi-Fi Direct group owner. Linux advertises on an
+# already-formed P2P interface; group creation remains OS-managed there.
 enabled = true
-# Leave empty for automatic P2P interface detection, or set names explicitly.
+# Leave empty for automatic Linux P2P interface detection, or set names.
 interfaces = []
 
 [clipboard]

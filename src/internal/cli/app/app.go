@@ -24,6 +24,29 @@ type App struct {
 	version   string
 }
 
+// startWiFiDirectClient connects this PC to a phone group owner when
+// wifi_direct.role is "client". Each new owner address gets one mTLS
+// WebSocket connection, which reconnects on its own while the daemon runs.
+func (a *App) startWiFiDirectClient(ctx context.Context) {
+	if !a.cfg.WiFiDirect.Enabled || a.cfg.WiFiDirect.Role != config.WiFiDirectRoleClient {
+		return
+	}
+	tlsCfg, err := websocket.GroupOwnerTLSConfig(a.cfg)
+	if err != nil {
+		log.Errorf("wifi direct client: %v", err)
+		return
+	}
+	var lastOwner string
+	discover.RunWiFiDirectClient(ctx, a.cfg, func(ownerIP string) {
+		if ownerIP == lastOwner {
+			return
+		}
+		lastOwner = ownerIP
+		log.Infof("wifi direct client: dialing group owner wss://%s:%d", ownerIP, a.cfg.Server.Port)
+		go a.server.RunGroupOwner(ctx, ownerIP, tlsCfg, a.version, a.writeRemote)
+	})
+}
+
 // RunOptions controls optional daemon behavior.
 type RunOptions struct {
 	NoWatch bool
@@ -91,6 +114,7 @@ func (a *App) Run(ctx context.Context, opts RunOptions) error {
 		}
 	}()
 	go a.server.RunPeers(ctx, a.version, a.writeRemote)
+	a.startWiFiDirectClient(ctx)
 
 	if err := discover.Start(ctx, a.cfg); err != nil {
 		log.Errorf("discovery: %v", err)

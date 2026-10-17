@@ -76,7 +76,7 @@ go install ./src/cmd/clipshare
 
 For normal users, download the Windows installer from the project release page.
 It installs ClipShare for the current user, asks for administrator permission
-to configure the Private-network firewall rules, creates the config in
+to configure LAN and Wi-Fi Direct firewall rules, creates the config in
 `%APPDATA%\clipshare`, and starts a Task Scheduler logon task in the same
 interactive desktop session as the clipboard. This is the recommended setup;
 ClipShare should not run as a Windows service when clipboard capture is needed.
@@ -189,13 +189,17 @@ The platform config path, generated with `clipshare config --init`:
 
 Ports: WS/TCP `40403`, UDP beacon `40404`, localhost API `40405` (127.0.0.1 only).
 
-When a Wi-Fi Direct group has already been formed by the operating system, the
-daemon advertises itself on the P2P interface automatically. See
-[Wi-Fi Direct configuration](docs/configuration.md#wifi-direct).
+On Windows, the daemon advertises as a Wi-Fi Direct peer/group owner so an
+Android client can initiate a direct connection without joining the same LAN.
+On Linux, Wi-Fi Direct advertising still requires a P2P interface created by
+the operating system. See [Wi-Fi Direct configuration](docs/configuration.md#wifi-direct).
 
 > **Full configuration reference:** [docs/configuration.md](docs/configuration.md) —
 > every key, both connection modes, and how to set up mutual TLS with
 > `clipshare cert`.
+>
+> **Device combinations:** [docs/connectivity-scenarios.md](docs/connectivity-scenarios.md) —
+> Windows/Linux/Android LAN, Wi-Fi Direct, and mTLS setup paths.
 
 ## Run as a background service (Linux, systemd user unit)
 

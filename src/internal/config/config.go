@@ -59,6 +59,9 @@ type Discovery struct {
 	Beacon     bool   `toml:"beacon"`
 	BeaconPort int    `toml:"beacon_port"`
 	BeaconAddr string `toml:"beacon_addr"`
+	// MDNSSubnets limits mDNS advertising to interfaces with an IPv4 address in
+	// one of these CIDR ranges (for example "192.168.1.0/24"). Empty means all.
+	MDNSSubnets []string `toml:"mdns_subnets"`
 }
 
 // WiFiDirect controls advertisement on an already-formed Wi-Fi Direct link.
@@ -67,7 +70,25 @@ type Discovery struct {
 type WiFiDirect struct {
 	Enabled    bool     `toml:"enabled"`
 	Interfaces []string `toml:"interfaces"`
+	// Role is "host" (default: this PC is the Wi-Fi Direct group owner and
+	// advertises itself) or "client" (this PC joins a phone-owned group and
+	// dials the phone's WebSocket server over mTLS).
+	Role string `toml:"role"`
+	// PeerName is the Wi-Fi Direct device name of the phone group owner
+	// (client role only), for example "Pixel 9".
+	PeerName string `toml:"peer_name"`
+	// ClientCA, ClientCert and ClientKey are the phone's CA and a client
+	// certificate issued by it (client role only, PEM paths).
+	ClientCA   string `toml:"client_ca"`
+	ClientCert string `toml:"client_cert"`
+	ClientKey  string `toml:"client_key"`
 }
+
+// WiFiDirectRoleHost and WiFiDirectRoleClient are the valid wifi_direct.role values.
+const (
+	WiFiDirectRoleHost   = "host"
+	WiFiDirectRoleClient = "client"
+)
 
 // Clipboard selects the clipboard backend on Linux. Windows ignores this
 // section because it uses the system clipboard API directly.
@@ -140,7 +161,7 @@ func Default() *Config {
 			BeaconPort: 40404,
 			BeaconAddr: "255.255.255.255",
 		},
-		WiFiDirect: WiFiDirect{Enabled: true},
+		WiFiDirect: WiFiDirect{Enabled: true, Role: WiFiDirectRoleHost},
 		Clipboard:  Clipboard{Backend: "auto"},
 		Log:        Log{Level: "info"},
 		Timing: Timing{
@@ -209,6 +230,9 @@ func Load() (*Config, error) {
 	}
 	cfg.Clipboard.Backend = normalizeClipboardBackend(cfg.Clipboard.Backend)
 	cfg.WiFiDirect.Interfaces = normalizeInterfaces(cfg.WiFiDirect.Interfaces)
+	if cfg.WiFiDirect.Role != WiFiDirectRoleClient {
+		cfg.WiFiDirect.Role = WiFiDirectRoleHost
+	}
 	cfg.Log.Level = normalizeLogLevel(cfg.Log.Level)
 
 	// Keep the deprecated top-level field in sync so re-saving is consistent.
@@ -316,10 +340,16 @@ mdns = %v
 beacon = %v
 beacon_port = %d
 beacon_addr = %q
+mdns_subnets = %s
 
 [wifi_direct]
 enabled = %v
 interfaces = %s
+role = %q
+peer_name = %q
+client_ca = %q
+client_cert = %q
+client_key = %q
 
 [clipboard]
 backend = %q
@@ -349,8 +379,9 @@ verify_hostname = %v
 		c.MaxImageBytes, c.MaxMessageBytes, c.Connection.Mode, tomlWhitelist(c.Connection.Whitelist),
 		c.Server.Port, c.Server.Bind,
 		c.API.Port, c.API.Bind,
-		c.Discovery.MDNS, c.Discovery.Beacon, c.Discovery.BeaconPort, c.Discovery.BeaconAddr,
+		c.Discovery.MDNS, c.Discovery.Beacon, c.Discovery.BeaconPort, c.Discovery.BeaconAddr, tomlSlice(c.Discovery.MDNSSubnets),
 		c.WiFiDirect.Enabled, tomlSlice(c.WiFiDirect.Interfaces),
+		c.WiFiDirect.Role, c.WiFiDirect.PeerName, c.WiFiDirect.ClientCA, c.WiFiDirect.ClientCert, c.WiFiDirect.ClientKey,
 		c.Clipboard.Backend,
 		c.Log.Level, c.Log.File,
 		c.Timing.HelloTimeout, c.Timing.WriteTimeout, c.Timing.PeerKeepalive,
