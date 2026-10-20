@@ -36,6 +36,9 @@ beacon_addr = "255.255.255.255"
 # Windows advertises as a Wi-Fi Direct group owner. Linux advertises on an
 # already-formed P2P interface; group creation remains OS-managed there.
 enabled = true
+# host = Windows owns the P2P group and Android connects to it (default).
+# client = Windows joins a phone-owned group (phone must be in host mode).
+role = "host"
 # Leave empty for automatic Linux P2P interface detection, or set names.
 interfaces = []
 

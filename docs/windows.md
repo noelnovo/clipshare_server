@@ -27,8 +27,11 @@ publishes it together with the Linux and Windows binaries.
 5. On a fresh install, it creates a private CA, Windows server certificate,
    Android client certificate, QR (`%APPDATA%\clipshare\certs\android-client.png`),
    and `.p12`, then enables TLS with hostname checking disabled for dynamic P2P
-   addresses. Scan the QR on the Android Client and enable Client TLS.
-6. The installer creates and starts a `ClipShare` logon task for the current
+   addresses. Scan the QR on the Android Client and import it as a client secret.
+6. The fresh config enables both LAN service and `[wifi_direct] role = "host"`,
+   so Android devices can join the Windows P2P group. The API is kept on
+   `127.0.0.1`, and logs go to `%APPDATA%\clipshare\logs\clipshare.log`.
+7. The installer creates and starts a `ClipShare` logon task for the current
    Windows user.
 
 The scenario matrix and Android pairing steps are in
@@ -131,6 +134,15 @@ After deleting the task, start the daemon manually with:
   `Local Area Connection*` Wi-Fi Direct adapter is up, and confirm the Android
   peer has joined the group. A Wi-Fi Direct connection does not require the
   phone and PC to share an infrastructure LAN.
+- **The P2P group forms and the phone gets `192.168.137.x`, but TCP to
+  `192.168.137.1:40403` times out:** remove stale firewall **Block** rules for
+  `clipshare.exe`. Wi-Fi Direct is classified as a Public network, and a Block
+  rule beats the allow rules. Check with
+  `netsh advfirewall firewall show rule name="clipshare.exe" verbose` and
+  delete the block rule:
+  `netsh advfirewall firewall delete rule name="clipshare.exe" dir=in action=block program="%LOCALAPPDATA%\ClipShare\clipshare.exe"`.
+  The installer removes it and adds a `ClipShare daemon` allow rule on all
+  profiles.
 - **The clipboard is not captured:** ensure the task uses `/SC ONLOGON` and
   `/RL LIMITED`, and run it from the same Windows account that owns the desktop.
 - **A previous administrator install exists:** uninstall that copy first, or

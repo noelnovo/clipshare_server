@@ -15,6 +15,10 @@ func RunWiFiDirectClient(ctx context.Context, cfg *config.Config, onOwner func(o
 	if !cfg.WiFiDirect.Enabled || cfg.WiFiDirect.Role != config.WiFiDirectRoleClient {
 		return
 	}
+	if !cfg.TLS.Enabled {
+		log.Warnf("wifi direct client: [tls].enabled = false; Wi-Fi Direct requires mutual TLS")
+		return
+	}
 	if cfg.WiFiDirect.PeerName == "" {
 		log.Warnf("wifi direct client: wifi_direct.peer_name is not set")
 		return
@@ -35,9 +39,13 @@ func Start(ctx context.Context, cfg *config.Config) error {
 	if err := advertiseIfEnabled(ctx, cfg); err != nil {
 		return fmt.Errorf("mdns advertise: %w", err)
 	}
-	// The client role joins a phone-owned group, so this PC must not also
-	// become a group owner or advertise on the P2P interface.
-	if cfg.WiFiDirect.Role != config.WiFiDirectRoleClient {
+	// Wi-Fi Direct is mTLS-only. Never advertise a plaintext P2P endpoint,
+	// even if the config enables Wi-Fi Direct while TLS is off.
+	if cfg.WiFiDirect.Enabled && !cfg.TLS.Enabled {
+		log.Warnf("wifi direct: disabled because [tls].enabled = false; Wi-Fi Direct requires mutual TLS")
+	} else if cfg.WiFiDirect.Role != config.WiFiDirectRoleClient {
+		// The client role joins a phone-owned group, so this PC must not also
+		// become a group owner or advertise on the P2P interface.
 		if err := startPlatformWiFiDirect(ctx, cfg); err != nil {
 			return fmt.Errorf("wifi direct platform startup: %w", err)
 		}

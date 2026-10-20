@@ -97,6 +97,19 @@ from the Android client's **Scan client secret** setting. Existing Windows
 configurations are preserved during upgrades, so enable TLS explicitly if the
 existing config has it off.
 
+Windows classifies the Wi-Fi Direct interface as a Public network. If a previous
+firewall prompt for `clipshare.exe` was declined, Windows may have created a
+**Block** rule for the Public profile, which takes precedence over the allow
+rules and makes TCP `40403` time out even though the P2P group is formed. The
+installer removes that block rule and adds a `ClipShare daemon` allow rule. For
+an existing install, check and remove it manually:
+
+```powershell
+netsh advfirewall firewall show rule name="clipshare.exe" verbose
+netsh advfirewall firewall delete rule name="clipshare.exe" dir=in action=block program="$env:LOCALAPPDATA\ClipShare\clipshare.exe"
+netsh advfirewall firewall add rule name="ClipShare daemon" dir=in action=allow program="$env:LOCALAPPDATA\ClipShare\clipshare.exe" profile=any
+```
+
 For an existing Windows or Linux server, create one CA and issue the server and
 Android client certificates from that server's config directory:
 

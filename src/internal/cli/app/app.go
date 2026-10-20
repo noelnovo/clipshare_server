@@ -31,6 +31,10 @@ func (a *App) startWiFiDirectClient(ctx context.Context) {
 	if !a.cfg.WiFiDirect.Enabled || a.cfg.WiFiDirect.Role != config.WiFiDirectRoleClient {
 		return
 	}
+	if !a.cfg.TLS.Enabled {
+		log.Errorf("wifi direct client: [tls].enabled = false; Wi-Fi Direct requires mutual TLS")
+		return
+	}
 	tlsCfg, err := websocket.GroupOwnerTLSConfig(a.cfg)
 	if err != nil {
 		log.Errorf("wifi direct client: %v", err)

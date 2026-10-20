@@ -34,9 +34,10 @@ Section "Install"
 
   ; Keep the user's config when the installer is run again for an upgrade.
   CreateDirectory "$APPDATA\clipshare"
+  CreateDirectory "$APPDATA\clipshare\logs"
   IfFileExists "$APPDATA\clipshare\config.toml" config_exists
     SetOutPath "$APPDATA\clipshare"
-    File "..\config.toml"
+    File "..\windows\config.toml"
 
     ; Fresh Windows installs start with mTLS enabled for Wi-Fi Direct. Keep
     ; upgrades' existing config untouched so users control their TLS rollout.
@@ -68,6 +69,7 @@ Section "Install"
       ClearErrors
       FileOpen $R4 "$APPDATA\clipshare\config.toml" "a"
       IfErrors tls_setup_failed
+      FileWrite $R4 "$\r$\n[log]$\r$\nlevel = $\"info$\"$\r$\nfile = '$APPDATA\clipshare\logs\clipshare.log'$\r$\n"
       FileWrite $R4 "$\r$\n[tls]$\r$\nenabled = true$\r$\nverify_hostname = false$\r$\n"
       FileClose $R4
       IfErrors tls_setup_failed
@@ -84,6 +86,17 @@ Section "Install"
   ; installer can use any per-user directory safely.
   SetOutPath "$INSTDIR"
   File "..\windows\run-clipshare.vbs"
+
+  ; A previous Windows Firewall prompt may have created a Block rule for
+  ; clipshare.exe on the Public profile. Wi-Fi Direct networks are classified
+  ; as Public, and block rules take precedence over the allow rules below.
+  ; Remove the stale block before adding the explicit allowances.
+  ExecWait '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="clipshare.exe" dir=in action=block program="$INSTDIR\clipshare.exe"'
+
+  ; Allow the daemon itself on every profile (the P2P interface has no normal
+  ; network profile). This matches accepting the Windows Firewall prompt.
+  ExecWait '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="ClipShare daemon"'
+  ExecWait '"$SYSDIR\netsh.exe" advfirewall firewall add rule name="ClipShare daemon" dir=in action=allow program="$INSTDIR\clipshare.exe" profile=any'
 
   ; LAN access requires administrator rights. Limit these rules to Private
   ; networks; the daemon should not be exposed on public networks.
@@ -124,6 +137,7 @@ Section "Uninstall"
   ExecWait '"$SYSDIR\schtasks.exe" /End /TN "ClipShare"'
   ExecWait '"$SYSDIR\schtasks.exe" /Delete /TN "ClipShare" /F'
   ExecWait '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="ClipShare WebSocket TCP 40403"'
+  ExecWait '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="ClipShare daemon"'
   ExecWait '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="ClipShare WiFi Direct TCP 40403"'
   ExecWait '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="ClipShare WiFi Direct P2P TCP 40403"'
   ExecWait '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="ClipShare UDP Beacon 40404"'

@@ -17,11 +17,20 @@ import (
 
 const wifiDirectPollInterval = 3 * time.Second
 
+// wifiDirectAllowed reports whether Wi-Fi Direct may run. P2P is mTLS-only:
+// enabling it while TLS is off must not advertise a plaintext endpoint.
+func wifiDirectAllowed(cfg *config.Config) bool {
+	return cfg.WiFiDirect.Enabled && cfg.TLS.Enabled
+}
+
 // startWiFiDirect advertises the daemon over DNS-SD on an already-created
 // Wi-Fi Direct interface. It deliberately does not create a P2P group: that
 // operation is controlled by Android, Windows, or NetworkManager.
 func startWiFiDirect(ctx context.Context, cfg *config.Config) error {
-	if !cfg.WiFiDirect.Enabled {
+	if !wifiDirectAllowed(cfg) {
+		if cfg.WiFiDirect.Enabled {
+			log.Warnf("wifi direct: disabled because [tls].enabled = false; Wi-Fi Direct requires mutual TLS")
+		}
 		return nil
 	}
 

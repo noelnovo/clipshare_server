@@ -52,6 +52,23 @@ func TestInterfaceKeyIsStable(t *testing.T) {
 	}
 }
 
+func TestWiFiDirectRequiresTLS(t *testing.T) {
+	cfg := config.Default()
+	cfg.WiFiDirect.Enabled = true
+	cfg.TLS.Enabled = false
+	if wifiDirectAllowed(cfg) {
+		t.Error("Wi-Fi Direct must be refused when TLS is disabled")
+	}
+	cfg.TLS.Enabled = true
+	if !wifiDirectAllowed(cfg) {
+		t.Error("Wi-Fi Direct should be allowed when TLS is enabled")
+	}
+	cfg.WiFiDirect.Enabled = false
+	if wifiDirectAllowed(cfg) {
+		t.Error("Wi-Fi Direct should be refused when disabled")
+	}
+}
+
 func TestStartPlatformWiFiDirectDisabled(t *testing.T) {
 	cfg := &config.Config{WiFiDirect: config.WiFiDirect{Enabled: false}}
 	if err := startPlatformWiFiDirect(t.Context(), cfg); err != nil {

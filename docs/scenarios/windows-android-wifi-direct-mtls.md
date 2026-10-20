@@ -73,7 +73,22 @@ wifi direct: Windows peer connected (status=Connected)
 Android shows connected over `wifi_direct`, then use **Text to push →
 Send to server**.
 
-> Status: P2P group formation is verified, but the `wss://192.168.137.1:40403`
-> data path is still timing out in live testing despite both firewall rules
-> being present. Verify the P2P rule with the `netsh ... show rule`
-> command above before testing clipboard sync.
+> Status: verified end-to-end on Windows 11 with a Pixel 9 (server 2.2.2):
+> Windows pairs the Android peer over WPS push-button, the phone receives a
+> `192.168.137.x` address, and the `wss://192.168.137.1:40403` session carries
+> clipboard data over mTLS. No infrastructure LAN is required.
+>
+> If the P2P group forms but TCP to `192.168.137.1:40403` still times out,
+> check for stale Windows Firewall **Block** rules for `clipshare.exe`.
+> Wi-Fi Direct networks are classified as Public, and block rules take
+> precedence over allow rules:
+>
+> ```powershell
+> netsh advfirewall firewall show rule name="clipshare.exe" verbose
+> netsh advfirewall firewall delete rule name="clipshare.exe" dir=in action=block program="$env:LOCALAPPDATA\ClipShare\clipshare.exe"
+> netsh advfirewall firewall add rule name="ClipShare daemon" dir=in action=allow program="$env:LOCALAPPDATA\ClipShare\clipshare.exe" profile=any
+> ```
+>
+> These Block rules are created when Windows asks whether to allow
+> `clipshare.exe` on a Public network and the prompt is declined. The installer
+> removes them and adds the per-program allow rule automatically.
