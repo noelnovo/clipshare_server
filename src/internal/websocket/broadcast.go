@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"time"
 
 	"clipshare/src/internal/clip"
 	"clipshare/src/internal/log"
@@ -43,6 +44,10 @@ func (s *Server) BroadcastLocal(content clip.Content, from string) {
 	msg, _ := json.Marshal(protocol.Envelope{Type: protocol.MsgClipboard, Data: payload})
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Record this as our own broadcast so echoes coming back from peers are
+	// recognized and dropped instead of being written to the local clipboard.
+	s.lastBroadcast = key
+	s.lastBroadcastT = time.Now()
 	for id, c := range s.clients {
 		if c.recentlySent(key, window) {
 			log.Debugf("broadcast to %s skipped: same content received recently", id)
@@ -54,6 +59,40 @@ func (s *Server) BroadcastLocal(content clip.Content, from string) {
 	}
 	for pc := range s.peers {
 		pc.Send(content, from)
+	}
+}
+
+// broadcastRemote forwards content received from a remote device to all other
+// connected devices, never back to the origin device.
+func (s *Server) broadcastRemote(content clip.Content, originDevice string, originClient *Client, originPeer *PeerClient) {
+	if content.Kind == clip.KindImage && int64(len(content.Image)) > s.cfg.MaxImageBytes {
+		log.Warnf("dropping image broadcast: %d bytes exceeds max_image_bytes=%d",
+			len(content.Image), s.cfg.MaxImageBytes)
+		return
+	}
+	payload, _ := json.Marshal(protocol.ContentMsg(content, protocol.NowMillis(), originDevice))
+	msg, _ := json.Marshal(protocol.Envelope{Type: protocol.MsgClipboard, Data: payload})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, c := range s.clients {
+		if originClient != nil && id == originClient.id {
+			continue
+		}
+		if c.name == originDevice {
+			continue
+		}
+		if err := c.write(msg); err != nil {
+			log.Errorf("broadcast to %s: %v", id, err)
+		}
+	}
+	for pc := range s.peers {
+		if pc == originPeer {
+			continue
+		}
+		if pc.remoteDevice() == originDevice {
+			continue
+		}
+		pc.Send(content, originDevice)
 	}
 }
 

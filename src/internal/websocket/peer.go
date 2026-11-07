@@ -21,10 +21,12 @@ import (
 
 // PeerClient connects out to a remote clipshare daemon (desktop-to-desktop).
 type PeerClient struct {
-	srv      *Server
-	conn     *websocket.Conn
-	connMu   sync.Mutex
-	onRemote func(content clip.Content, from string)
+	srv        *Server
+	conn       *websocket.Conn
+	connMu     sync.Mutex
+	onRemote   func(content clip.Content, from string)
+	remoteName string
+	remoteMu   sync.Mutex
 }
 
 // RunPeers dials each configured peer and reconnects with backoff until ctx
@@ -38,6 +40,21 @@ func (s *Server) RunPeers(ctx context.Context, version string, onRemote func(con
 		pc := &PeerClient{srv: s, onRemote: onRemote}
 		go pc.run(ctx, host, version)
 	}
+}
+
+func (pc *PeerClient) setRemoteName(name string) {
+	if name == "" {
+		return
+	}
+	pc.remoteMu.Lock()
+	defer pc.remoteMu.Unlock()
+	pc.remoteName = name
+}
+
+func (pc *PeerClient) remoteDevice() string {
+	pc.remoteMu.Lock()
+	defer pc.remoteMu.Unlock()
+	return pc.remoteName
 }
 
 func (pc *PeerClient) run(ctx context.Context, host, version string) {
@@ -132,18 +149,26 @@ func (pc *PeerClient) readLoop(ctx context.Context, conn *websocket.Conn, host s
 		if err := json.Unmarshal(msg, &env); err != nil {
 			continue
 		}
-		if env.Type != protocol.MsgClipboard {
+		switch env.Type {
+		case protocol.MsgHello:
+			var hello protocol.Hello
+			if err := json.Unmarshal(env.Data, &hello); err == nil {
+				pc.setRemoteName(hello.Name)
+			}
+			continue
+		case protocol.MsgClipboard:
+			// handled below
+		default:
 			continue
 		}
 		var cm protocol.ClipboardMsg
 		if err := json.Unmarshal(env.Data, &cm); err != nil {
 			continue
 		}
-		content, ok := protocol.MsgToContent(cm)
-		if !ok || pc.onRemote == nil {
-			continue
+		if pc.remoteDevice() == "" && cm.From != "" {
+			pc.setRemoteName(cm.From)
 		}
-		pc.onRemote(content, cm.From)
+		pc.srv.ReceiveClipboard(nil, pc, cm)
 	}
 }
 
