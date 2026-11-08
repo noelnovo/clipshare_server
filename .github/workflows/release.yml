@@ -1,10 +1,6 @@
 name: Release
 
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       prerelease:
@@ -22,11 +18,6 @@ permissions:
 jobs:
   generate-installer:
     name: Generate Windows installer
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-       github.event.pull_request.merged == true &&
-       startsWith(github.event.pull_request.head.ref, 'release/'))
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -42,7 +33,12 @@ jobs:
       - name: Extract version
         id: version
         run: |
+          set -euo pipefail
           VERSION=$(make version)
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: could not parse version"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Install NSIS
@@ -62,12 +58,6 @@ jobs:
 
   release:
     needs: generate-installer
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-       github.event.pull_request.merged == true &&
-       startsWith(github.event.pull_request.head.ref, 'release/') &&
-       needs.generate-installer.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -81,7 +71,12 @@ jobs:
       - name: Extract version
         id: version
         run: |
+          set -euo pipefail
           VERSION=$(make version)
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: could not parse version"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
@@ -113,7 +108,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
-          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease == 'true' || contains(steps.version.outputs.version, '-') }}
+          prerelease: ${{ inputs.prerelease == 'true' || contains(steps.version.outputs.version, '-') }}
           files: |
             dist/clipshare-${{ steps.version.outputs.version }}-alpine-amd64
             dist/clipshare-${{ steps.version.outputs.version }}-arch-amd64
