@@ -307,6 +307,20 @@ Import the `.p12` (or scan the QR) on the phone. Set the same values for
 (exported in the legacy 3DES PKCS#12 format for Android compatibility — treat
 the file like a secret).
 
+**Trusting multiple CAs (daemon-to-daemon TLS without re-pairing Android):**
+Each daemon can keep its own CA so already-paired Android clients stay valid,
+and additionally trust a peer's CA for the daemon-to-daemon link:
+
+```sh
+clipshare cert trust /path/to/peer/certs/ca.pem   # append peer's CA to local ca.pem
+```
+
+The foreign CA is appended to the local `ca.pem` (kept as the first
+certificate, so issuing still uses the local CA) only if not already present.
+Restart the daemon afterwards. No config change is needed because `tls.ca`
+already points at `ca.pem`, which `LoadPool` reads as a multi-certificate
+bundle. Repeat on the other daemon with the first daemon's CA.
+
 The QR payload uses a compact gzip-compressed envelope of the key, leaf
 certificate and CA (all in DER) instead of the raw `.p12`, keeping the QR small
 enough to scan reliably. The app rebuilds the PKCS#12 bundle locally and
