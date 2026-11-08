@@ -7,6 +7,8 @@ INSTALL_DIR  ?= $(HOME)/.local/bin
 VERSION_FILE := src/internal/version/version.go
 
 VERSION := $(shell sed -n 's/.*const Version = "\([^"]*\)".*/\1/p' $(VERSION_FILE))
+VERSION_BASE := $(shell echo "$(VERSION)" | sed 's/-.*//')
+VERSION_NUMERIC := $(VERSION_BASE).0
 DIST    := dist
 
 GO_LDFLAGS := -s -w
@@ -41,7 +43,7 @@ build-all: build-alpine build-arch build-windows ## Build release binaries for A
 installer: build-windows ## Build a Windows NSIS installer from the repo template
 	@mkdir -p $(DIST)
 	cp $(BIN_WIN) $(DIST)/clipshare-$(VERSION)-windows-amd64.exe
-	@sed "s/__VERSION__/$(VERSION)/g" windows/clipshare-installer.nsi > $(DIST)/clipshare-installer.nsi
+	@sed -e "s/__VERSION__/$(VERSION)/g" -e "s/__VERSION_NUMERIC__/$(VERSION_NUMERIC)/g" windows/clipshare-installer.nsi > $(DIST)/clipshare-installer.nsi
 	@makensis -INPUTCHARSET UTF-8 $(DIST)/clipshare-installer.nsi
 
 release: build-all installer ## Build all release binaries and the Windows installer
