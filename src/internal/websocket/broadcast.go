@@ -78,9 +78,10 @@ func (s *Server) broadcastRemote(content clip.Content, originDevice string, orig
 		if originClient != nil && id == originClient.id {
 			continue
 		}
-		if c.name == originDevice {
-			continue
-		}
+		// Do not skip by device name: multiple distinct clients can share a
+		// name (e.g. two Android simulators, or two phones with the same
+		// default name). Identity (originClient) plus the duplicate-content
+		// dedup in ReceiveClipboard already prevent echo/relay loops.
 		if err := c.write(msg); err != nil {
 			log.Errorf("broadcast to %s: %v", id, err)
 		}
@@ -89,9 +90,7 @@ func (s *Server) broadcastRemote(content clip.Content, originDevice string, orig
 		if pc == originPeer {
 			continue
 		}
-		if pc.remoteDevice() == originDevice {
-			continue
-		}
+		// Do not skip by remote device name (see client-side note above).
 		pc.Send(content, originDevice)
 	}
 }
