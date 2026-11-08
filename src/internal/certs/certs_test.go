@@ -2,6 +2,7 @@ package certs_test
 
 import (
 	"crypto/x509"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"testing"
@@ -105,5 +106,57 @@ func TestLoadPoolMissingFile(t *testing.T) {
 	_, err := certs.LoadPool(filepath.Join(t.TempDir(), "missing.pem"))
 	if err == nil {
 		t.Error("expected error for missing CA file")
+	}
+}
+
+func TestTrust(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	if err := certs.Init(dirA); err != nil {
+		t.Fatal(err)
+	}
+	if err := certs.Init(dirB); err != nil {
+		t.Fatal(err)
+	}
+	caB := filepath.Join(dirB, certs.CaCertFile)
+	if err := certs.Trust(dirA, caB); err != nil {
+		t.Fatalf("Trust failed: %v", err)
+	}
+	// ca.pem in dirA should now contain two certificates.
+	data, _ := os.ReadFile(filepath.Join(dirA, certs.CaCertFile))
+	n := 0
+	rest := data
+	for {
+		block, r := pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		rest = r
+		if block.Type == "CERTIFICATE" {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("expected 2 certs after trust, got %d", n)
+	}
+	// Trusting again is idempotent.
+	if err := certs.Trust(dirA, caB); err != nil {
+		t.Fatalf("second Trust failed: %v", err)
+	}
+	data2, _ := os.ReadFile(filepath.Join(dirA, certs.CaCertFile))
+	n2 := 0
+	rest2 := data2
+	for {
+		block, r := pem.Decode(rest2)
+		if block == nil {
+			break
+		}
+		rest2 = r
+		if block.Type == "CERTIFICATE" {
+			n2++
+		}
+	}
+	if n2 != 2 {
+		t.Errorf("expected still 2 certs after re-trust, got %d", n2)
 	}
 }

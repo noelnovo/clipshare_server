@@ -24,6 +24,10 @@ return fmt.Errorf(`usage: clipshare cert <init|issue|export|qr|list>
                        [--out path.png]                  app can scan to import
                                                           this device identity
                                                           and trust this server
+  clipshare cert trust <path-to-foreign-ca.pem>        add another daemon's CA
+                                                          to this daemon's
+                                                          trust store (multi-CA
+                                                          TLS, no re-pairing)
   clipshare cert list                                  show issued certificates`)
 	}
 	dir, err := certDir()
@@ -41,6 +45,11 @@ return fmt.Errorf(`usage: clipshare cert <init|issue|export|qr|list>
 		return runQr(dir, args[1:])
 	case "list":
 		return runList(dir)
+	case "trust":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: clipshare cert trust <path-to-foreign-ca.pem>")
+		}
+		return runTrust(dir, args[1])
 	default:
 		return fmt.Errorf("unknown cert subcommand %q", args[0])
 	}

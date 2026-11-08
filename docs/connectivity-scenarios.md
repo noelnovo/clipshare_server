@@ -131,6 +131,23 @@ paths. Enable TLS on both; configure mutual `peers` addresses if both directions
 should relay clipboard updates. Set `tls.verify_hostname = false` when peer
 addresses are dynamic.
 
+**Avoiding re-pairing existing Android clients:** you do not have to share (or
+regenerate) a single CA across machines. Each daemon can keep its own CA so
+already-paired Android clients keep working, and additionally trust the peer's
+CA for the daemon-to-daemon link:
+
+```sh
+# On daemon A, after daemon B sends you its ca.pem (or any client/server cert
+# issued by B's CA):
+clipshare cert trust /path/to/daemon-B/certs/ca.pem
+```
+
+`cert trust` appends the foreign CA to this daemon's `certs/ca.pem` (kept as
+the first certificate, so `cert init`/issuing still use the local CA) only if it
+is not already trusted. Restart the daemon afterwards. The local CA stays
+unchanged, so existing Android clients remain valid; both CAs are now in the
+trust pool used for TLS verification. Repeat on the other daemon with A's CA.
+
 For a plaintext LAN test, set `tls.enabled = false` on both daemons. This has no
 client-certificate checks and should not be used over untrusted networks.
 
