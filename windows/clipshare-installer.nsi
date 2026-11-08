@@ -1,6 +1,7 @@
 !define APP_NAME "ClipShare"
 !define COMPANY_NAME "ClipShare"
 !define APP_VERSION "__VERSION__"
+!define APP_VERSION_NUMERIC "__VERSION_NUMERIC__"
 
 Name "${APP_NAME}"
 OutFile "..\dist\clipshare-${APP_VERSION}-windows-installer.exe"
@@ -11,7 +12,7 @@ ShowUninstDetails show
 
 !include "MUI2.nsh"
 
-VIProductVersion "${APP_VERSION}.0"
+VIProductVersion "${APP_VERSION_NUMERIC}"
 VIAddVersionKey /LANG=1033 "ProductName" "${APP_NAME}"
 VIAddVersionKey /LANG=1033 "CompanyName" "${COMPANY_NAME}"
 VIAddVersionKey /LANG=1033 "FileDescription" "ClipShare clipboard sharing daemon"
