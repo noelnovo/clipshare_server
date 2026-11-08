@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	"clipshare/src/internal/api"
 	"clipshare/src/internal/clip"
@@ -21,6 +22,33 @@ type App struct {
 	api       *api.Server
 	watcher   *clip.Watcher
 	version   string
+}
+
+// startWiFiDirectClient connects this PC to a phone group owner when
+// wifi_direct.role is "client". Each new owner address gets one mTLS
+// WebSocket connection, which reconnects on its own while the daemon runs.
+func (a *App) startWiFiDirectClient(ctx context.Context) {
+	if !a.cfg.WiFiDirect.Enabled || a.cfg.WiFiDirect.Role != config.WiFiDirectRoleClient {
+		return
+	}
+	if !a.cfg.TLS.Enabled {
+		log.Errorf("wifi direct client: [tls].enabled = false; Wi-Fi Direct requires mutual TLS")
+		return
+	}
+	tlsCfg, err := websocket.GroupOwnerTLSConfig(a.cfg)
+	if err != nil {
+		log.Errorf("wifi direct client: %v", err)
+		return
+	}
+	var lastOwner string
+	discover.RunWiFiDirectClient(ctx, a.cfg, func(ownerIP string) {
+		if ownerIP == lastOwner {
+			return
+		}
+		lastOwner = ownerIP
+		log.Infof("wifi direct client: dialing group owner wss://%s:%d", ownerIP, a.cfg.Server.Port)
+		go a.server.RunGroupOwner(ctx, ownerIP, tlsCfg, a.version, a.writeRemote)
+	})
 }
 
 // RunOptions controls optional daemon behavior.
@@ -58,10 +86,23 @@ func (a *App) Run(ctx context.Context, opts RunOptions) error {
 	// Wire the remote-write callback after the watcher exists so we can use
 	// LocalWrite when watching is enabled (avoiding rebroadcast loops).
 	if !opts.NoWatch {
+		var watcherOpts []clip.WatcherOption
+		notifyCh, stopNotify, err := clip.StartClipboardNotifier(ctx)
+		defer stopNotify()
+		switch {
+		case err == nil:
+			watcherOpts = append(watcherOpts, clip.WithNotifier(notifyCh))
+			log.Infof("clipboard watching: event-driven")
+		case errors.Is(err, clip.ErrNotifierUnavailable):
+			log.Debugf("clipboard watching: polling every %s (%v)", a.cfg.WatchInterval(), err)
+		default:
+			log.Warnf("clipboard change events unavailable (%v); falling back to %s polling",
+				err, a.cfg.WatchInterval())
+		}
 		a.watcher = clip.NewWatcher(a.clipboard, a.cfg.WatchInterval(), func(content clip.Content) {
 			log.Debugf("local clipboard changed")
 			a.server.BroadcastLocal(content, a.cfg.DeviceName)
-		})
+		}, watcherOpts...)
 		a.server.SetOnRemoteClip(a.writeRemote)
 		go a.watcher.Run(ctx)
 	} else {
@@ -77,6 +118,7 @@ func (a *App) Run(ctx context.Context, opts RunOptions) error {
 		}
 	}()
 	go a.server.RunPeers(ctx, a.version, a.writeRemote)
+	a.startWiFiDirectClient(ctx)
 
 	if err := discover.Start(ctx, a.cfg); err != nil {
 		log.Errorf("discovery: %v", err)

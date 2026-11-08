@@ -269,3 +269,119 @@ func TestExternalChangeStillFiresAfterLocalWrite(t *testing.T) {
 		t.Errorf("got %v, want [external]", got)
 	}
 }
+
+// startEventWatcher builds a watcher in event-driven mode. The interval is
+// set to an hour so any polling would fail these tests by timeout.
+func startEventWatcher(t *testing.T, fb clip.Interface, notify chan struct{}, cb func(clip.Content)) (*clip.Watcher, context.CancelFunc, <-chan string) {
+	t.Helper()
+	got := make(chan string, 16)
+	w := clip.NewWatcher(fb, time.Hour, func(c clip.Content) {
+		cb(c)
+		got <- c.Text
+	}, clip.WithNotifier(notify))
+	ctx, cancel := context.WithCancel(context.Background())
+	go w.Run(ctx)
+	return w, cancel, got
+}
+
+func TestEventWatcherDetectsChange(t *testing.T) {
+	fb := &fakeClipboard{content: clip.Content{Kind: clip.KindText, Text: "first"}}
+	notify := make(chan struct{}, 8)
+
+	_, cancel, got := startEventWatcher(t, fb, notify, func(clip.Content) {})
+	defer cancel()
+
+	// Initial snapshot, then one external change with a single notification.
+	time.Sleep(60 * time.Millisecond)
+	fb.setContent(clip.Content{Kind: clip.KindText, Text: "second"})
+	notify <- struct{}{}
+
+	select {
+	case text := <-got:
+		if text != "second" {
+			t.Errorf("got %q, want %q", text, "second")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for event-driven detection")
+	}
+}
+
+func TestEventWatcherCoalescesBurst(t *testing.T) {
+	fb := &fakeClipboard{content: clip.Content{Kind: clip.KindText, Text: "first"}}
+	notify := make(chan struct{}, 8)
+
+	_, cancel, got := startEventWatcher(t, fb, notify, func(clip.Content) {})
+	defer cancel()
+
+	time.Sleep(60 * time.Millisecond)
+	fb.setContent(clip.Content{Kind: clip.KindText, Text: "second"})
+	for i := 0; i < 5; i++ {
+		notify <- struct{}{}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// The whole burst must settle into a single callback.
+	select {
+	case text := <-got:
+		if text != "second" {
+			t.Errorf("got %q, want %q", text, "second")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for coalesced event")
+	}
+	time.Sleep(200 * time.Millisecond) // allow any duplicate to slip out
+	cancel()
+
+	for {
+		select {
+		case extra := <-got:
+			t.Errorf("unexpected extra callback: %q", extra)
+		default:
+			return
+		}
+	}
+}
+
+func TestEventWatcherIgnoresSameContent(t *testing.T) {
+	fb := &fakeClipboard{content: clip.Content{Kind: clip.KindText, Text: "same"}}
+	notify := make(chan struct{}, 8)
+
+	_, cancel, got := startEventWatcher(t, fb, notify, func(clip.Content) {})
+	defer cancel()
+
+	time.Sleep(60 * time.Millisecond)
+	for i := 0; i < 3; i++ {
+		notify <- struct{}{}
+	}
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+
+	select {
+	case text := <-got:
+		t.Errorf("expected no callbacks, got %q", text)
+	default:
+	}
+}
+
+func TestEventWatcherLocalWriteNoRebroadcast(t *testing.T) {
+	fb := &fakeClipboard{content: clip.Content{Kind: clip.KindText, Text: "initial"}}
+	notify := make(chan struct{}, 8)
+
+	w, cancel, got := startEventWatcher(t, fb, notify, func(clip.Content) {})
+	defer cancel()
+
+	time.Sleep(60 * time.Millisecond)
+	w.LocalWrite(clip.Content{Kind: clip.KindText, Text: "remote"})
+	notify <- struct{}{} // the write itself triggers WM_CLIPBOARDUPDATE
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+
+	select {
+	case text := <-got:
+		t.Errorf("rebroadcast local write as external change: %q", text)
+	default:
+	}
+	if len(fb.writes) != 1 || fb.writes[0].Text != "remote" {
+		t.Errorf("writes: got %+v", fb.writes)
+	}
+}

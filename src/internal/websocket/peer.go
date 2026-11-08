@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -20,10 +21,12 @@ import (
 
 // PeerClient connects out to a remote clipshare daemon (desktop-to-desktop).
 type PeerClient struct {
-	srv      *Server
-	conn     *websocket.Conn
-	connMu   sync.Mutex
-	onRemote func(content clip.Content, from string)
+	srv        *Server
+	conn       *websocket.Conn
+	connMu     sync.Mutex
+	onRemote   func(content clip.Content, from string)
+	remoteName string
+	remoteMu   sync.Mutex
 }
 
 // RunPeers dials each configured peer and reconnects with backoff until ctx
@@ -39,20 +42,45 @@ func (s *Server) RunPeers(ctx context.Context, version string, onRemote func(con
 	}
 }
 
+func (pc *PeerClient) setRemoteName(name string) {
+	if name == "" {
+		return
+	}
+	pc.remoteMu.Lock()
+	defer pc.remoteMu.Unlock()
+	pc.remoteName = name
+}
+
+func (pc *PeerClient) remoteDevice() string {
+	pc.remoteMu.Lock()
+	defer pc.remoteMu.Unlock()
+	return pc.remoteName
+}
+
 func (pc *PeerClient) run(ctx context.Context, host, version string) {
 	addr := host
 	if !strings.Contains(addr, ":") {
 		addr += ":" + strconv.Itoa(pc.srv.cfg.Server.Port)
 	}
 	scheme := consts.SchemeWS
-	var opts *websocket.DialOptions
+	var tlsCfg *tls.Config
 	if pc.srv.cfg.TLS.Enabled {
 		scheme = consts.SchemeWSS
-		tlsCfg, err := pc.srv.peerTLSConfig()
+		cfg, err := pc.srv.peerTLSConfig()
 		if err != nil {
 			log.Errorf("peer %s: tls config: %v", host, err)
 			return
 		}
+		tlsCfg = cfg
+	}
+	pc.dialLoop(ctx, host, addr, scheme, tlsCfg, version)
+}
+
+// dialLoop keeps a connection to addr open, reconnecting with backoff, until
+// ctx is done. tlsCfg is used only for wss.
+func (pc *PeerClient) dialLoop(ctx context.Context, host, addr, scheme string, tlsCfg *tls.Config, version string) {
+	var opts *websocket.DialOptions
+	if tlsCfg != nil {
 		opts = &websocket.DialOptions{
 			HTTPClient: &http.Client{Transport: &http.Transport{TLSClientConfig: tlsCfg}},
 		}
@@ -121,18 +149,26 @@ func (pc *PeerClient) readLoop(ctx context.Context, conn *websocket.Conn, host s
 		if err := json.Unmarshal(msg, &env); err != nil {
 			continue
 		}
-		if env.Type != protocol.MsgClipboard {
+		switch env.Type {
+		case protocol.MsgHello:
+			var hello protocol.Hello
+			if err := json.Unmarshal(env.Data, &hello); err == nil {
+				pc.setRemoteName(hello.Name)
+			}
+			continue
+		case protocol.MsgClipboard:
+			// handled below
+		default:
 			continue
 		}
 		var cm protocol.ClipboardMsg
 		if err := json.Unmarshal(env.Data, &cm); err != nil {
 			continue
 		}
-		content, ok := protocol.MsgToContent(cm)
-		if !ok || pc.onRemote == nil {
-			continue
+		if pc.remoteDevice() == "" && cm.From != "" {
+			pc.setRemoteName(cm.From)
 		}
-		pc.onRemote(content, cm.From)
+		pc.srv.ReceiveClipboard(nil, pc, cm)
 	}
 }
 

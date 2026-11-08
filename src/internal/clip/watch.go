@@ -9,6 +9,12 @@ import (
 	"clipshare/src/internal/log"
 )
 
+// eventSettleDelay lets a burst of clipboard-change notifications die down
+// before reading. Clipboard writers frequently place several updates back to
+// back, and the final writer may still hold the clipboard open when the
+// notification arrives.
+const eventSettleDelay = 50 * time.Millisecond
+
 // Watcher polls the clipboard for external changes and fires onChange with
 // the new content. It applies loop protection: content written by the local
 // client (via Track/LocalWrite) is not reported again.
@@ -23,10 +29,28 @@ type Watcher struct {
 	onChange func(Content)
 	lastHash uint64
 	skipHash uint64
+
+	// notify, when non-nil, delivers clipboard-change events and switches Run
+	// to event-driven mode (no polling). Set via WithNotifier before Run.
+	notify <-chan struct{}
 }
 
-func NewWatcher(c Interface, interval time.Duration, onChange func(Content)) *Watcher {
-	return &Watcher{clip: c, interval: interval, onChange: onChange}
+// WatcherOption customizes optional Watcher behavior.
+type WatcherOption func(*Watcher)
+
+// WithNotifier switches the watcher to event-driven mode: it reacts to
+// notifications on ch instead of polling every interval. The interval is
+// unused in this mode.
+func WithNotifier(ch <-chan struct{}) WatcherOption {
+	return func(w *Watcher) { w.notify = ch }
+}
+
+func NewWatcher(c Interface, interval time.Duration, onChange func(Content), opts ...WatcherOption) *Watcher {
+	w := &Watcher{clip: c, interval: interval, onChange: onChange}
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w
 }
 
 func hashContent(c Content) uint64 {
@@ -43,11 +67,18 @@ func hashContent(c Content) uint64 {
 	return h.Sum64()
 }
 
-// Run polls the clipboard until ctx is cancelled.
+// Run watches the clipboard until ctx is cancelled: event-driven when a
+// notifier is attached, interval polling otherwise.
 func (w *Watcher) Run(ctx context.Context) {
 	w.mu.Lock()
 	w.lastHash = w.snapshot()
 	w.mu.Unlock()
+
+	if w.notify != nil {
+		w.runEvents(ctx)
+		return
+	}
+
 	t := time.NewTicker(w.interval)
 	defer t.Stop()
 	for {
@@ -55,21 +86,64 @@ func (w *Watcher) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			w.mu.Lock()
-			c, err := w.clip.Read()
-			if err != nil {
-				w.mu.Unlock()
-				log.Errorf("clipboard read: %v", err)
-				continue
-			}
-			h := hashContent(c)
-			fire := h != w.lastHash && h != w.skipHash
-			w.lastHash = h
-			w.mu.Unlock()
-			if fire {
-				w.onChange(c)
-			}
+			w.check()
 		}
+	}
+}
+
+// runEvents reacts to clipboard-change notifications instead of polling. Each
+// notification settles first so bursts coalesce into a single read.
+func (w *Watcher) runEvents(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-w.notify:
+			if !w.settle(ctx) {
+				return
+			}
+			w.check()
+		}
+	}
+}
+
+// settle waits eventSettleDelay for the notification burst to finish,
+// extending the window for every further notification. It returns false if
+// ctx was cancelled while waiting.
+func (w *Watcher) settle(ctx context.Context) bool {
+	t := time.NewTimer(eventSettleDelay)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-w.notify:
+			if !t.Stop() {
+				<-t.C
+			}
+			t.Reset(eventSettleDelay)
+		case <-t.C:
+			return true
+		}
+	}
+}
+
+// check reads the clipboard and fires onChange when its hash changed since
+// the previous check. Read errors are logged and treated as no change.
+func (w *Watcher) check() {
+	w.mu.Lock()
+	c, err := w.clip.Read()
+	if err != nil {
+		w.mu.Unlock()
+		log.Errorf("clipboard read: %v", err)
+		return
+	}
+	h := hashContent(c)
+	fire := h != w.lastHash && h != w.skipHash
+	w.lastHash = h
+	w.mu.Unlock()
+	if fire {
+		w.onChange(c)
 	}
 }
 

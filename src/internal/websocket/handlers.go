@@ -13,6 +13,8 @@ import (
 	"clipshare/src/internal/protocol"
 )
 
+const remoteDedupWindow = 2 * time.Second
+
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Token != "" && r.URL.Query().Get("token") != s.cfg.Token {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -112,34 +114,54 @@ func (s *Server) handleClient(ctx context.Context, c *Client) {
 				s.sendError(c, protocol.ErrBadClipboard, "invalid clipboard payload")
 				continue
 			}
-			s.handleClipboard(c, cm)
+			s.ReceiveClipboard(c, nil, cm)
 		default:
 			s.sendError(c, protocol.ErrUnknownType, "unrecognized message type")
 		}
 	}
 }
 
-func (s *Server) handleClipboard(from *Client, msg protocol.ClipboardMsg) {
+// ReceiveClipboard is the single entry point for clipboard content arriving
+// from any transport (inbound WebSocket client or outbound peer read loop).
+// originClient is set for inbound clients; originPeer for peer connections.
+func (s *Server) ReceiveClipboard(originClient *Client, originPeer *PeerClient, msg protocol.ClipboardMsg) {
 	content, ok := protocol.MsgToContent(msg)
 	if !ok {
 		return
 	}
-	// Loop protection: ignore content identical to what we last wrote locally
-	// (echo of our own broadcast).
 	key := protocol.ContentKey(content)
-	from.noteIncoming(key)
+	if originClient != nil {
+		originClient.noteIncoming(key)
+	}
+
+	// Loop protection: ignore content that is an echo of something we
+	// broadcast ourselves, and ignore duplicate deliveries of the same content
+	// that arrive over multiple connections to the same peer.
 	s.mu.Lock()
 	isEcho := key == s.lastBroadcast && time.Since(s.lastBroadcastT) < s.cfg.Timing.EchoWindow
-	if !isEcho {
-		s.lastBroadcast = key
-		s.lastBroadcastT = time.Now()
+	isDup := key == s.lastRemoteKey && time.Since(s.lastRemoteAt) < remoteDedupWindow
+	if !isEcho && !isDup {
+		s.lastRemoteKey = key
+		s.lastRemoteAt = time.Now()
 	}
+	// NOTE: deliberately do NOT update s.lastBroadcast here. lastBroadcast is
+	// only set by BroadcastLocal when we ourselves originate content, so that
+	// echoes coming back from peers can be recognized and dropped. Treating
+	// received content as our own broadcast caused legitimate re-deliveries
+	// (and re-copies of the same text) to be dropped as false echoes.
 	s.mu.Unlock()
-	if isEcho {
+	if isEcho || isDup {
+		log.Debugf("clipboard from %q ignored (echo=%v dup=%v)", msg.From, isEcho, isDup)
 		return
 	}
+	log.Debugf("clipboard received from %q", msg.From)
 	if s.onRemoteClip != nil {
 		s.onRemoteClip(content, msg.From)
 	}
-	s.Broadcast(content, msg.From, from.id)
+	s.broadcastRemote(content, msg.From, originClient, originPeer)
+}
+
+// handleClipboard is retained for callers/tests that use the old name.
+func (s *Server) handleClipboard(from *Client, msg protocol.ClipboardMsg) {
+	s.ReceiveClipboard(from, nil, msg)
 }

@@ -1,0 +1,39 @@
+# Default ClipShare configuration for a Windows install.
+# The installer appends [log] and [tls] on a fresh install.
+# Omitted keys fall back to the compiled-in defaults.
+
+mdns = true
+broadcast = 5
+watch = 300
+token = ""
+peers = []
+max_image_bytes = 10485760
+max_message_bytes = 10485760
+
+[connection]
+mode = "discover"
+whitelist = []
+
+[server]
+port = 40403
+bind = "0.0.0.0"
+
+# The control API has no authentication. Keep it local to this PC.
+[api]
+port = 40405
+bind = "127.0.0.1"
+
+[discovery]
+mdns = true
+beacon = true
+beacon_port = 40404
+beacon_addr = "255.255.255.255"
+
+# Windows hosts the Wi-Fi Direct group; Android clients join it.
+[wifi_direct]
+enabled = true
+role = "host"
+interfaces = []
+
+[clipboard]
+backend = "auto"

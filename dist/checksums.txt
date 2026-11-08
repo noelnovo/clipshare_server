@@ -1,2 +1,0 @@
-ff6d2a6860a4e4b7aec0e7112eba8592e61c1dd8724e9d185e5eac99c3e3a343  clipshare-0.1.0-linux-amd64
-d486047e66a0d3f168b7bea2341d850e76b05074935d083a0e89edde5865efbc  clipshare-0.1.0-windows-amd64.exe

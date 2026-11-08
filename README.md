@@ -22,6 +22,8 @@ the peer device.
 - **Loop protection** — never rebroadcasts content it wrote itself
 - **Zero-config discovery** — mDNS (`_clipshare._tcp`) + UDP beacons on `40404`
   so the phone connects automatically
+- **Wi-Fi Direct advertisement** — publishes the WebSocket endpoint on an
+  already-formed P2P interface, so Android devices can share without a router
 - **One-shot `send`** — push text (or your current clipboard) without keeping a
   daemon running; it starts transiently, delivers, and exits
 - Cross-platform: **Linux** (Wayland + X11) and **Windows**
@@ -63,8 +65,8 @@ export PATH=$HOME/.local/bin:$PATH
 source ~/.zshrc
 ```
 
-Alternatively use `go install` (puts the binary in `$(go env GOPATH)/bin`,
-usually `~/go/bin`):
+Alternatively use `go install` (puts the binary in `GOBIN`, or in the `bin`
+directory of `GOPATH`, usually `~/go/bin`):
 
 ```sh
 go install ./src/cmd/clipshare
@@ -72,23 +74,41 @@ go install ./src/cmd/clipshare
 
 ### Windows
 
+For normal users, download the Windows installer from the project release page.
+It installs ClipShare for the current user, asks for administrator permission
+to configure LAN and Wi-Fi Direct firewall rules, creates the config in
+`%APPDATA%\clipshare`, and starts a Task Scheduler logon task in the same
+interactive desktop session as the clipboard. This is the recommended setup;
+ClipShare should not run as a Windows service when clipboard capture is needed.
+
+See [Windows installation](docs/windows.md) for manual installation, firewall
+rules, task management, upgrades, and troubleshooting.
+
+For developers, install the current Windows build with Go. `go install` writes
+to `GOBIN`, or otherwise to the `bin` directory of `GOPATH`.
+
 ```powershell
-# build (in the repo)
-go build -o clipshare.exe ./src/cmd/clipshare
+# from the repository root
+# build a native Windows binary
+GOOS=windows GOARCH=amd64 go build -o clipshare.exe .\src\cmd\clipshare
 
-# move it somewhere permanent, e.g.
-mkdir $HOME\bin
-Move-Item .\clipshare.exe $HOME\bin\
+# install it from source into GOBIN or GOPATH\bin
+go install .\src\cmd\clipshare
 
-# add that folder to PATH (persistent)
-setx PATH "$env:PATH;$HOME\bin"
+# show the directories Go uses for installed binaries
+go env GOBIN
+go env GOPATH
 
-# restart your terminal, then verify
+# verify the command is on PATH
 clipshare --help
 ```
 
-> `go install` also works on Windows and drops the binary into
-> `%USERPROFILE%\go\bin` — just add that folder to PATH instead.
+If `clipshare` is not found, add the Go binary directory to `PATH`. When
+`GOBIN` is empty, that directory is `Join-Path (go env GOPATH) "bin"`.
+
+> On Windows, the clipboard watcher must run in the same user desktop
+> session that owns the interactive clipboard. That means the recommended
+> background shape is a login task, not a Windows service session.
 
 ## Usage
 
@@ -102,7 +122,7 @@ clipshare watch [--timeout d]   temporarily listen (max 120s) and write the
                                 first incoming push to the local clipboard,
                                 then exit
 clipshare status                show daemon status + connected clients
-clipshare config --init         write default config to ~/.config/clipshare/config.toml
+ clipshare config --init         write default config to the platform config path
 clipshare cert                  manage mTLS certificates (init/issue/export/qr/list)
 ```
 
@@ -145,14 +165,17 @@ transient one-shot server otherwise; `--oneshot` forces the transient server.
 
 ## Config
 
-`~/.config/clipshare/config.toml` — generated with `clipshare config --init`:
+The platform config path, generated with `clipshare config --init`:
+
+- Linux: `~/.config/clipshare/config.toml`
+- Windows: `%APPDATA%\clipshare\config.toml`
 
 | key          | default    | meaning                                        |
 |--------------|------------|------------------------------------------------|
 | `device_name`| hostname   | name shown to clients                          |
 | `mdns`       | `true`     | advertise via mDNS `_clipshare._tcp`           |
 | `broadcast`  | `5`        | UDP beacon interval in seconds                 |
-| `watch`      | `300`      | clipboard poll interval in ms                  |
+| `watch`      | `300`      | fallback clipboard poll interval in ms (used only when change events are unavailable, e.g. headless) |
 | `token`      | `""`       | shared secret; if set, clients must send it    |
 | `peers`      | `[]`       | desktop-to-desktop peer hosts (`ip[:port]`)    |
 | `max_image_bytes` | `10485760` | drop images larger than this when broadcasting |
@@ -166,9 +189,17 @@ transient one-shot server otherwise; `--oneshot` forces the transient server.
 
 Ports: WS/TCP `40403`, UDP beacon `40404`, localhost API `40405` (127.0.0.1 only).
 
+On Windows, the daemon advertises as a Wi-Fi Direct peer/group owner so an
+Android client can initiate a direct connection without joining the same LAN.
+On Linux, Wi-Fi Direct advertising still requires a P2P interface created by
+the operating system. See [Wi-Fi Direct configuration](docs/configuration.md#wifi-direct).
+
 > **Full configuration reference:** [docs/configuration.md](docs/configuration.md) —
 > every key, both connection modes, and how to set up mutual TLS with
 > `clipshare cert`.
+>
+> **Device combinations:** [docs/connectivity-scenarios.md](docs/connectivity-scenarios.md) —
+> Windows/Linux/Android LAN, Wi-Fi Direct, and mTLS setup paths.
 
 ## Run as a background service (Linux, systemd user unit)
 
@@ -193,6 +224,15 @@ systemctl --user daemon-reload
 systemctl --user enable --now clipshare
 systemctl --user status clipshare
 ```
+
+## Run ClipShare automatically on Windows
+
+The Windows clipboard notification path depends on the interactive user
+session. Use the [Windows installation guide](docs/windows.md), which covers
+the installer and the equivalent manual `schtasks` setup. A scheduled logon
+task is required for clipboard capture; a Windows service session is not a
+reliable fit. If you only need a network daemon without local clipboard
+watching, `daemon --no-watch` can be used instead.
 
 ## Security
 

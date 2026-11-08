@@ -3,12 +3,15 @@
 This document is the reference for every configuration option in the ClipShare
 server. There is only one config file; it lives at:
 
-```
+On Linux and other Unix systems:
+
+```text
 $HOME/.config/clipshare/config.toml
 ```
 
-or wherever `CLIPSHARE_CONFIG` points (recommended on Windows, where `HOME`
-may be unset).
+On Windows, the default is `%APPDATA%\clipshare\config.toml`. The
+`CLIPSHARE_CONFIG` environment variable can still override the default on any
+platform.
 
 - Generate the default file with `clipshare config --init`.
 - Re-save the current effective config with `clipshare config`.
@@ -22,13 +25,15 @@ may be unset).
 | `device_name` | string | hostname | The name this daemon announces. Shown in `hello`, `status`, and mDNS/beacon discovery. The Android app's "device name" is the analogous setting. |
 | `mdns` | bool | `true` | **Deprecated.** Use `[discovery] mdns` instead. Kept for backward compatibility. |
 | `broadcast` | int (seconds) | `5` | Interval of the UDP discovery beacon. `<= 0` falls back to 5s. |
-| `watch` | int (milliseconds) | `300` | Clipboard poll interval. Values `< 50` are clamped back to `300`. |
+| `watch` | int (milliseconds) | `300` | Fallback clipboard poll interval, used only when platform change-events are unavailable. Values `< 50` are clamped back to `300`. |
 | `token` | string | `""` | Optional shared secret. When set, clients must pass `?token=` on the WebSocket URL (the Android app and desktop peers do this automatically). Empty = no token check. **Security note:** without TLS the token travels in plaintext (URL and never again in the beacon). Prefer mTLS (`[tls]`). |
 | `peers` | []string | `[]` | Desktop-to-desktop relay targets: `host[:port]`. Each is dialed out and retried with backoff. Used to relay clipboard data between two desktops. |
 | `max_image_bytes` | int | `10485760` | Images larger than this are dropped at broadcast time instead of being sent. 0 or negative falls back to 10 MiB. |
 | `max_message_bytes` | int | `10485760` | Maximum WebSocket message size allowed from clients. 0 or negative falls back to 10 MiB. |
 | `server.port` | int | `40403` | WebSocket listen port. |
 | `server.bind` | string | `"0.0.0.0"` | WebSocket listen address. Use `127.0.0.1` to accept only local connections. |
+| `wifi_direct.enabled` | bool | `true` | Advertise on Wi-Fi Direct. Windows starts an autonomous group-owner advertisement; Linux advertises on a P2P interface created by the OS. |
+| `wifi_direct.interfaces` | []string | `[]` | Optional exact Linux P2P interface names. Empty uses P2P names and common Android/Windows P2P address ranges. |
 | `api.port` | int | `40405` | Localhost control API port. |
 | `api.bind` | string | `"127.0.0.1"` | Localhost control API bind address. |
 | `connection.mode` | string | `"discover"` | How this daemon finds and trusts peers. `"discover"` or `"whitelist"` (below). |
@@ -50,6 +55,110 @@ It only has effect when `connection.mode = "discover"`.
 | `discovery.beacon` | bool | `true` | Send UDP broadcast beacons. |
 | `discovery.beacon_port` | int | `40404` | UDP beacon destination port. Must match the Android client's "Beacon port" setting if changed. |
 | `discovery.beacon_addr` | string | `"255.255.255.255"` | UDP beacon destination address. |
+
+### Wi-Fi Direct
+
+On Windows, the daemon advertises as a Wi-Fi Direct peer and autonomous group
+owner using the Windows Wi-Fi Direct API. An Android client can discover the
+Windows computer by its Windows computer name, form a P2P group, and connect to
+the daemon's WebSocket listener on TCP `40403`. The ordinary `_clipshare._tcp`
+mDNS advertisement also starts on the P2P interface after the group is formed.
+
+On Linux, the daemon still advertises only on a Wi-Fi Direct interface that
+has already been created by the operating system. Android-to-Android uses the
+Android Wi-Fi P2P service advertisement. Android's Bonjour P2P service
+discovery and Windows' Wi-Fi Direct Services discovery are different protocols,
+so the Windows/Android path uses peer discovery and the configured computer
+name instead of that service-record exchange.
+
+#### Require mTLS for Wi-Fi Direct
+
+ClipShare's TLS setting applies to the daemon's WebSocket endpoint on **all**
+transports (LAN and Wi-Fi Direct); there is not a separate P2P port or TLS
+setting. Enable it on the server before connecting an Android client:
+
+```toml
+[wifi_direct]
+enabled = true
+
+[server]
+bind = "0.0.0.0"
+port = 40403
+
+[tls]
+enabled = true
+verify_hostname = false
+```
+
+The Windows installer configures the P2P firewall rule. On a fresh Windows
+installation it also creates the private CA, server identity, and a client
+certificate QR at `%APPDATA%\clipshare\certs\android-client.png`; scan that QR
+from the Android client's **Scan client secret** setting. Existing Windows
+configurations are preserved during upgrades, so enable TLS explicitly if the
+existing config has it off.
+
+Windows classifies the Wi-Fi Direct interface as a Public network. If a previous
+firewall prompt for `clipshare.exe` was declined, Windows may have created a
+**Block** rule for the Public profile, which takes precedence over the allow
+rules and makes TCP `40403` time out even though the P2P group is formed. The
+installer removes that block rule and adds a `ClipShare daemon` allow rule. For
+an existing install, check and remove it manually:
+
+```powershell
+netsh advfirewall firewall show rule name="clipshare.exe" verbose
+netsh advfirewall firewall delete rule name="clipshare.exe" dir=in action=block program="$env:LOCALAPPDATA\ClipShare\clipshare.exe"
+netsh advfirewall firewall add rule name="ClipShare daemon" dir=in action=allow program="$env:LOCALAPPDATA\ClipShare\clipshare.exe" profile=any
+```
+
+For an existing Windows or Linux server, create one CA and issue the server and
+Android client certificates from that server's config directory:
+
+```sh
+clipshare cert init                                  # only if this server has no CA yet
+clipshare cert issue --name desktop --type server
+clipshare cert issue --name pixel-9 --type client
+clipshare cert qr --name pixel-9 --type client --out pixel-9-client.png
+```
+
+Do not run `cert init` again if you already have certificates; existing clients
+trust the current CA. Enable `tls.enabled = true` in the daemon config and
+restart it. Import `pixel-9-client.png` with **Scan client secret** (or export
+the `.p12` with `clipshare cert export` and select it in the app). The Android
+client's TLS switch must also be on. The imported bundle contains the client's
+private key, its CA-signed client certificate, and the server CA; the server
+rejects clients without a certificate signed by that CA.
+
+`verify_hostname = false` is required for dynamically assigned P2P addresses
+unless the server certificate contains the exact group-owner IP in its SAN. It
+still validates the certificate chain against the CA. Android's **Verify
+hostname** option is separate and should also be off for a dynamically assigned
+P2P address.
+
+For Android-to-Android, put the group-owner phone in **Server** mode, enable its
+Server TLS option, and scan that phone's **Show client secret** QR on the other
+phone. The receiving phone is the **Client** and must enable Client TLS. The
+server phone issues the client's identity from its own CA, just as the desktop
+CLI does.
+
+> Android's Client TLS preference currently applies to all discovered
+> transports. Turning it on secures LAN connections as well as Wi-Fi Direct.
+> Transport-specific mTLS enforcement is being completed after the P2P
+> connection path is verified.
+
+Automatic interface detection recognizes interface names containing `p2p`, `Wi-Fi Direct`,
+or `WiFi Direct`, plus the common `192.168.49.0/24` and `192.168.137.0/24`
+group ranges. For other drivers, configure the exact interface name:
+
+```toml
+[wifi_direct]
+enabled = true
+interfaces = ["my-p2p-interface"]
+```
+
+Wi-Fi Direct link encryption does not replace ClipShare authentication. The
+Android app requires mTLS for its Wi-Fi Direct WebSocket connections; enable
+`tls.enabled` on the server and issue/import a client identity. Set
+`tls.verify_hostname = false` when the P2P address is dynamically assigned.
 
 ### Timing
 

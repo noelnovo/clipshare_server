@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -42,6 +43,9 @@ func TestDefaults(t *testing.T) {
 	if !cfg.TLS.VerifyHostname {
 		t.Error("TLS verify_hostname: got false, want true (strict by default)")
 	}
+	if !cfg.WiFiDirect.Enabled {
+		t.Error("wifi_direct enabled: got false, want true")
+	}
 }
 
 func TestPathUsesEnvVar(t *testing.T) {
@@ -54,9 +58,34 @@ func TestPathUsesEnvVar(t *testing.T) {
 
 func TestPathFallsBackToHome(t *testing.T) {
 	t.Setenv("CLIPSHARE_CONFIG", "")
+	t.Setenv("APPDATA", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	want := filepath.Join(home, ".config", "clipshare", "config.toml")
+	if got := config.Path(); got != want {
+		t.Errorf("Path() = %q, want %q", got, want)
+	}
+}
+
+func TestPathFallsBackToWindowsUserProfile(t *testing.T) {
+	t.Setenv("CLIPSHARE_CONFIG", "")
+	t.Setenv("HOME", "")
+	t.Setenv("APPDATA", "")
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	want := filepath.Join(home, ".config", "clipshare", "config.toml")
+	if got := config.Path(); got != want {
+		t.Errorf("Path() = %q, want %q", got, want)
+	}
+}
+
+func TestPathUsesAppDataOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-specific config location")
+	}
+	t.Setenv("CLIPSHARE_CONFIG", "")
+	t.Setenv("APPDATA", `C:\Users\test\AppData\Roaming`)
+	want := filepath.Join(`C:\Users\test\AppData\Roaming`, "clipshare", "config.toml")
 	if got := config.Path(); got != want {
 		t.Errorf("Path() = %q, want %q", got, want)
 	}
@@ -108,6 +137,10 @@ level = "debug"
 
 [tls]
 verify_hostname = false
+
+[wifi_direct]
+enabled = false
+interfaces = ["p2p0"]
 `
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -151,6 +184,12 @@ verify_hostname = false
 	}
 	if cfg.TLS.VerifyHostname {
 		t.Error("TLS verify_hostname: got true, want false (parsed from toml)")
+	}
+	if cfg.WiFiDirect.Enabled {
+		t.Error("wifi_direct enabled: got true, want false")
+	}
+	if len(cfg.WiFiDirect.Interfaces) != 1 || cfg.WiFiDirect.Interfaces[0] != "p2p0" {
+		t.Errorf("wifi_direct interfaces: got %+v", cfg.WiFiDirect.Interfaces)
 	}
 }
 

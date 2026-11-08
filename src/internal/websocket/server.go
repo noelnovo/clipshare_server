@@ -27,6 +27,8 @@ type Server struct {
 	onClientConnect func()
 	lastBroadcast   uint64
 	lastBroadcastT  time.Time
+	lastRemoteKey   uint64
+	lastRemoteAt    time.Time
 	started         time.Time
 }
 

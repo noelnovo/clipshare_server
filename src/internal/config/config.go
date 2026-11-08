@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -23,6 +25,7 @@ type Config struct {
 	MaxImageBytes   int64      `toml:"max_image_bytes"`
 	MaxMessageBytes int64      `toml:"max_message_bytes"`
 	Discovery       Discovery  `toml:"discovery"`
+	WiFiDirect      WiFiDirect `toml:"wifi_direct"`
 	Timing          Timing     `toml:"timing"`
 	Clipboard       Clipboard  `toml:"clipboard"`
 	Log             Log        `toml:"log"`
@@ -56,7 +59,36 @@ type Discovery struct {
 	Beacon     bool   `toml:"beacon"`
 	BeaconPort int    `toml:"beacon_port"`
 	BeaconAddr string `toml:"beacon_addr"`
+	// MDNSSubnets limits mDNS advertising to interfaces with an IPv4 address in
+	// one of these CIDR ranges (for example "192.168.1.0/24"). Empty means all.
+	MDNSSubnets []string `toml:"mdns_subnets"`
 }
+
+// WiFiDirect controls advertisement on an already-formed Wi-Fi Direct link.
+// Group creation remains platform-owned; the daemon only discovers the P2P
+// interface and advertises its existing WebSocket endpoint there.
+type WiFiDirect struct {
+	Enabled    bool     `toml:"enabled"`
+	Interfaces []string `toml:"interfaces"`
+	// Role is "host" (default: this PC is the Wi-Fi Direct group owner and
+	// advertises itself) or "client" (this PC joins a phone-owned group and
+	// dials the phone's WebSocket server over mTLS).
+	Role string `toml:"role"`
+	// PeerName is the Wi-Fi Direct device name of the phone group owner
+	// (client role only), for example "Pixel 9".
+	PeerName string `toml:"peer_name"`
+	// ClientCA, ClientCert and ClientKey are the phone's CA and a client
+	// certificate issued by it (client role only, PEM paths).
+	ClientCA   string `toml:"client_ca"`
+	ClientCert string `toml:"client_cert"`
+	ClientKey  string `toml:"client_key"`
+}
+
+// WiFiDirectRoleHost and WiFiDirectRoleClient are the valid wifi_direct.role values.
+const (
+	WiFiDirectRoleHost   = "host"
+	WiFiDirectRoleClient = "client"
+)
 
 // Clipboard selects the clipboard backend on Linux. Windows ignores this
 // section because it uses the system clipboard API directly.
@@ -129,8 +161,9 @@ func Default() *Config {
 			BeaconPort: 40404,
 			BeaconAddr: "255.255.255.255",
 		},
-		Clipboard: Clipboard{Backend: "auto"},
-		Log:       Log{Level: "info"},
+		WiFiDirect: WiFiDirect{Enabled: true, Role: WiFiDirectRoleHost},
+		Clipboard:  Clipboard{Backend: "auto"},
+		Log:        Log{Level: "info"},
 		Timing: Timing{
 			HelloTimeout:       5 * time.Second,
 			WriteTimeout:       3 * time.Second,
@@ -149,7 +182,23 @@ func Path() string {
 	if cfg := os.Getenv("CLIPSHARE_CONFIG"); cfg != "" {
 		return cfg
 	}
-	return filepath.Join(os.Getenv("HOME"), ".config", "clipshare", "config.toml")
+	if runtime.GOOS == "windows" {
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			return filepath.Join(appData, "clipshare", "config.toml")
+		}
+	}
+
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = os.Getenv("USERPROFILE")
+	}
+	if home == "" {
+		home = os.Getenv("HOMEDRIVE") + os.Getenv("HOMEPATH")
+	}
+	if home == "" {
+		return filepath.Join(".config", "clipshare", "config.toml")
+	}
+	return filepath.Join(home, ".config", "clipshare", "config.toml")
 }
 
 func Load() (*Config, error) {
@@ -180,6 +229,10 @@ func Load() (*Config, error) {
 		cfg.Discovery.BeaconAddr = "255.255.255.255"
 	}
 	cfg.Clipboard.Backend = normalizeClipboardBackend(cfg.Clipboard.Backend)
+	cfg.WiFiDirect.Interfaces = normalizeInterfaces(cfg.WiFiDirect.Interfaces)
+	if cfg.WiFiDirect.Role != WiFiDirectRoleClient {
+		cfg.WiFiDirect.Role = WiFiDirectRoleHost
+	}
 	cfg.Log.Level = normalizeLogLevel(cfg.Log.Level)
 
 	// Keep the deprecated top-level field in sync so re-saving is consistent.
@@ -287,6 +340,16 @@ mdns = %v
 beacon = %v
 beacon_port = %d
 beacon_addr = %q
+mdns_subnets = %s
+
+[wifi_direct]
+enabled = %v
+interfaces = %s
+role = %q
+peer_name = %q
+client_ca = %q
+client_cert = %q
+client_key = %q
 
 [clipboard]
 backend = %q
@@ -316,7 +379,9 @@ verify_hostname = %v
 		c.MaxImageBytes, c.MaxMessageBytes, c.Connection.Mode, tomlWhitelist(c.Connection.Whitelist),
 		c.Server.Port, c.Server.Bind,
 		c.API.Port, c.API.Bind,
-		c.Discovery.MDNS, c.Discovery.Beacon, c.Discovery.BeaconPort, c.Discovery.BeaconAddr,
+		c.Discovery.MDNS, c.Discovery.Beacon, c.Discovery.BeaconPort, c.Discovery.BeaconAddr, tomlSlice(c.Discovery.MDNSSubnets),
+		c.WiFiDirect.Enabled, tomlSlice(c.WiFiDirect.Interfaces),
+		c.WiFiDirect.Role, c.WiFiDirect.PeerName, c.WiFiDirect.ClientCA, c.WiFiDirect.ClientCert, c.WiFiDirect.ClientKey,
 		c.Clipboard.Backend,
 		c.Log.Level, c.Log.File,
 		c.Timing.HelloTimeout, c.Timing.WriteTimeout, c.Timing.PeerKeepalive,
@@ -379,6 +444,23 @@ func normalizeLogLevel(v string) string {
 	default:
 		return "info"
 	}
+}
+
+func normalizeInterfaces(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (c *Config) BroadcastInterval() time.Duration {

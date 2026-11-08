@@ -1,34 +1,53 @@
-BIN      := clipshare
-BIN_WIN  := clipshare.exe
-BIN_LNX  := clipshare-linux-amd64
-INSTALL_DIR ?= $(HOME)/.local/bin
+BIN          := clipshare
+BIN_WIN      := clipshare.exe
+BIN_LNX      := clipshare-linux-amd64
+BIN_ALPINE   := clipshare-alpine-amd64
+BIN_ARCH     := clipshare-arch-amd64
+INSTALL_DIR  ?= $(HOME)/.local/bin
+VERSION_FILE := src/internal/version/version.go
 
-VERSION := $(shell grep 'Version = ' src/internal/version/version.go | sed -e 's/.*"\([^"]*\)".*/\1/')
+VERSION := $(shell sed -n 's/.*const Version = "\([^"]*\)".*/\1/p' $(VERSION_FILE))
 DIST    := dist
 
 GO_LDFLAGS := -s -w
 
-.PHONY: all build build-linux build-windows build-all release install uninstall clean test
+.PHONY: all build build-linux build-windows build-all release version install uninstall clean test installer
 
 all: build
 
 build: ## Build for the current platform
 	go build -o $(BIN) ./src/cmd/clipshare
 
-build-linux: ## Cross-compile a static Linux amd64 binary
-	GOOS=linux GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o $(BIN_LNX) ./src/cmd/clipshare
+build-linux: ## Cross-compile a static Linux amd64 binary (works on Alpine, Arch, and other glibc/musl distros)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o $(BIN_LNX) ./src/cmd/clipshare
+
+build-alpine: ## Cross-compile a static Linux amd64 binary for Alpine Linux (musl)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o $(BIN_ALPINE) ./src/cmd/clipshare
+
+build-arch: ## Cross-compile a Linux amd64 binary for Arch Linux (glibc)
+	GOOS=linux GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o $(BIN_ARCH) ./src/cmd/clipshare
 
 build-windows: ## Cross-compile a Windows amd64 binary
 	GOOS=windows GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o $(BIN_WIN) ./src/cmd/clipshare
 
-build-all: build-linux build-windows ## Build release binaries for all platforms into $(DIST)
+build-all: build-alpine build-arch build-windows ## Build release binaries for Alpine, Arch, and Windows into $(DIST)
 	@mkdir -p $(DIST)
-	cp $(BIN_LNX) $(DIST)/clipshare-$(VERSION)-linux-amd64
+	cp $(BIN_ALPINE) $(DIST)/clipshare-$(VERSION)-alpine-amd64
+	cp $(BIN_ARCH) $(DIST)/clipshare-$(VERSION)-arch-amd64
 	cp $(BIN_WIN) $(DIST)/clipshare-$(VERSION)-windows-amd64.exe
-	cd $(DIST) && sha256sum clipshare-$(VERSION)-linux-amd64 clipshare-$(VERSION)-windows-amd64.exe > checksums.txt
+	cd $(DIST) && sha256sum clipshare-$(VERSION)-alpine-amd64 clipshare-$(VERSION)-arch-amd64 clipshare-$(VERSION)-windows-amd64.exe > checksums.txt
 	@echo "Release artifacts in $(DIST)/"
 
-release: build-all ## Alias for build-all (used by CI)
+installer: build-windows ## Build a Windows NSIS installer from the repo template
+	@mkdir -p $(DIST)
+	cp $(BIN_WIN) $(DIST)/clipshare-$(VERSION)-windows-amd64.exe
+	@sed "s/__VERSION__/$(VERSION)/g" windows/clipshare-installer.nsi > $(DIST)/clipshare-installer.nsi
+	@makensis -INPUTCHARSET UTF-8 $(DIST)/clipshare-installer.nsi
+
+release: build-all installer ## Build all release binaries and the Windows installer
+
+version: ## Print the application version used by release artifacts
+	@printf '%s\n' "$(VERSION)"
 
 install: build ## Symlink $(BIN) into $(INSTALL_DIR) and print PATH hint
 	@mkdir -p $(INSTALL_DIR)
