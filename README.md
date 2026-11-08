@@ -39,15 +39,17 @@ the peer device.
 ## Build
 
 ```sh
-# Linux
-make build                # -> ./clipshare
-
-# Windows (cross-compile from Linux)
+make build                # -> ./clipshare (current platform)
+make build-linux          # -> ./clipshare-linux-amd64 (static, works on Alpine/Arch/other)
+make build-alpine         # -> ./clipshare-alpine-amd64
+make build-arch           # -> ./clipshare-arch-amd64
 make build-windows        # -> ./clipshare.exe
+make build-all            # all release binaries into ./dist
+make installer            # Windows NSIS installer (requires makensis)
 
 # or with Go directly
 go build -o clipshare ./src/cmd/clipshare           # current platform
-GOOS=windows GOARCH=amd64 go build -o clipshare.exe ./src/cmd/clipshare
+GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o clipshare.exe ./src/cmd/clipshare
 ```
 
 ## Install to your PATH
@@ -123,7 +125,7 @@ clipshare watch [--timeout d]   temporarily listen (max 120s) and write the
                                 then exit
 clipshare status                show daemon status + connected clients
  clipshare config --init         write default config to the platform config path
-clipshare cert                  manage mTLS certificates (init/issue/export/qr/list)
+clipshare cert                  manage mTLS certificates (init/issue/export/qr/trust/list)
 ```
 
 ### Sending text
@@ -247,6 +249,12 @@ watching, `daemon --no-watch` can be used instead.
   controlled by `tls.verify_hostname` (default `true`, strict); set it to
   `false` so certificates stay valid across wifi/DHCP changes
   (see [docs/configuration.md](docs/configuration.md)).
+- **Multi-daemon TLS without re-pairing:** each daemon can keep its own CA (so
+  already-paired Android clients stay valid) and additionally trust a peer's CA
+  with `clipshare cert trust <foreign-ca.pem>`. The foreign CA is appended to
+  the local `ca.pem` (kept first, so issuing still uses the local CA); the
+  daemon must be restarted afterwards. See
+  [docs/connectivity-scenarios.md](docs/connectivity-scenarios.md).
 - **Token:** a shared secret passed as `?token=` (encrypted under `wss`).
   Without TLS it travels in plaintext on the URL.
 - **Whitelist mode:** set `connection.mode = "whitelist"` to stop advertising
@@ -289,6 +297,40 @@ JSON over WebSocket (port `40403`):
 | `clipboard` | `{type, text?, data?, mime?, ts, from}` — `type` is `"text"` (default) or `"image"` (base64 `data`) |
 | `ping`/`pong` | —                                 |
 | `error`     | `{code, msg}`                       |
+
+## Releases
+
+Pre-built binaries are published on the
+[GitHub Releases](https://github.com/noelnovo/clipshare_server/releases) page:
+
+- `clipshare-<version>-alpine-amd64`
+- `clipshare-<version>-arch-amd64`
+- `clipshare-<version>-windows-amd64.exe`
+- `clipshare-<version>-windows-installer.exe`
+- `checksums.txt`
+
+Alpha/beta versions are marked as **pre-releases**.
+
+### Release process
+
+Releases are cut by **pushing a git tag** (the professional, standard flow):
+
+```sh
+# 1. bump src/internal/version/version.go
+# 2. commit
+git tag -a v2.2.5-alpha -m "Alpha release 2.2.5-alpha"
+git push origin v2.2.5-alpha
+```
+
+Pushing the tag triggers the `Release` GitHub Actions workflow, which:
+1. Builds Alpine, Arch and Windows binaries (`make build-all`).
+2. Generates the Windows NSIS installer.
+3. Creates the GitHub Release with all assets + checksums.
+4. Marks it as a pre-release if the version contains `-`.
+
+Merges to `main` only run CI (unit + integration tests + version check) — no
+release is created on merge. The release pipeline can also be triggered
+manually from the Actions tab (`workflow_dispatch`).
 
 ## Project layout
 
