@@ -144,10 +144,11 @@ func (s *Server) ReceiveClipboard(originClient *Client, originPeer *PeerClient, 
 		s.lastRemoteKey = key
 		s.lastRemoteAt = time.Now()
 	}
-	if !isEcho {
-		s.lastBroadcast = key
-		s.lastBroadcastT = time.Now()
-	}
+	// NOTE: deliberately do NOT update s.lastBroadcast here. lastBroadcast is
+	// only set by BroadcastLocal when we ourselves originate content, so that
+	// echoes coming back from peers can be recognized and dropped. Treating
+	// received content as our own broadcast caused legitimate re-deliveries
+	// (and re-copies of the same text) to be dropped as false echoes.
 	s.mu.Unlock()
 	if isEcho || isDup {
 		log.Debugf("clipboard from %q ignored (echo=%v dup=%v)", msg.From, isEcho, isDup)

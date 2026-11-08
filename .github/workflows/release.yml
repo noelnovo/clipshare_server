@@ -6,6 +6,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Mark the release as a pre-release (alpha/beta/rc)'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 permissions:
   contents: write
@@ -54,10 +63,11 @@ jobs:
   release:
     needs: generate-installer
     if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'release/') &&
-      needs.generate-installer.result == 'success'
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'release/') &&
+       needs.generate-installer.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -86,7 +96,7 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build release binaries
+      - name: Build release binaries (Alpine, Arch, Windows)
         if: steps.tag_check.outputs.exists == 'false'
         run: make build-all
 
@@ -103,8 +113,10 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease == 'true' || contains(steps.version.outputs.version, '-') }}
           files: |
-            dist/clipshare-${{ steps.version.outputs.version }}-linux-amd64
+            dist/clipshare-${{ steps.version.outputs.version }}-alpine-amd64
+            dist/clipshare-${{ steps.version.outputs.version }}-arch-amd64
             dist/clipshare-${{ steps.version.outputs.version }}-windows-amd64.exe
             dist/clipshare-${{ steps.version.outputs.version }}-windows-installer.exe
             dist/checksums.txt
