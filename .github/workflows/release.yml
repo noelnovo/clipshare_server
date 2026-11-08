@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       prerelease:
@@ -24,6 +27,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -62,6 +67,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -78,37 +85,28 @@ jobs:
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Ensure version tag does not already exist
-        id: tag_check
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag $TAG already exists. Skipping release."
+          # Tag name: prefer the pushed tag, otherwise v<version>
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build release binaries (Alpine, Arch, Windows)
-        if: steps.tag_check.outputs.exists == 'false'
         run: make build-all
 
       - name: Download Windows installer
-        if: steps.tag_check.outputs.exists == 'false'
         uses: actions/download-artifact@v4
         with:
           name: clipshare-windows-installer-${{ steps.version.outputs.version }}
           path: dist
 
       - name: Create GitHub Release
-        if: steps.tag_check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
-          prerelease: ${{ inputs.prerelease == 'true' || contains(steps.version.outputs.version, '-') }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease == 'true' || contains(steps.version.outputs.version, '-') }}
           files: |
             dist/clipshare-${{ steps.version.outputs.version }}-alpine-amd64
             dist/clipshare-${{ steps.version.outputs.version }}-arch-amd64
